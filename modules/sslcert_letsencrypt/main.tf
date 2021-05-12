@@ -1,0 +1,56 @@
+resource "tls_private_key" "private_key" {
+  algorithm = "RSA"
+}
+
+resource "acme_registration" "reg" {
+  account_key_pem = tls_private_key.private_key.private_key_pem
+  email_address   = "andrii@${var.domain}"
+}
+
+resource "acme_certificate" "certificate" {
+  account_key_pem = acme_registration.reg.account_key_pem
+  common_name     = local.site_fqdn
+
+  dns_challenge {
+    provider = var.dns_provider
+  }
+}
+
+locals {
+  site_fqdn = "${var.host}.${var.domain}"
+  cert_bundle = <<EOT
+${acme_certificate.certificate.certificate_pem}
+
+${acme_certificate.certificate.issuer_pem}
+    EOT
+}
+
+# to make life easier when installing
+resource "local_file" "ssl_private_key_file" {
+  sensitive_content = acme_certificate.certificate.private_key_pem
+  filename          = "./${local.site_fqdn}_private_key.pem"
+}
+
+resource "local_file" "ssl_cert_file" {
+  sensitive_content = acme_certificate.certificate.certificate_pem
+  filename          = "./${local.site_fqdn}_cert.pem"
+}
+
+resource "local_file" "ssl_cert_bundle_file" {
+  sensitive_content = local.cert_bundle
+  filename          = "./${local.site_fqdn}_cert_bundle.pem"
+}
+
+/* # Certificate : Upload into GCP
+resource "google_compute_ssl_certificate" "tfe" {
+  name_prefix = "${var.host}-tfe-"
+  description = "TFE LB cert"
+  private_key = acme_certificate.certificate.private_key_pem
+  #  certificate = acme_certificate.certificate.certificate_pem
+  certificate = "${acme_certificate.certificate.certificate_pem}${acme_certificate.certificate.issuer_pem}"
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+*/
